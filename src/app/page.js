@@ -1,38 +1,53 @@
-"use client";// pages/index.js (or pages/index.jsx)
+"use client"; // pages/index.js (or pages/index.jsx)
 import { useState } from 'react';
 import Tesseract from 'tesseract.js';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
 export default function Home() {
-  const [scannedText, setScannedText] = useState('');
-  const [parsedData, setParsedData] = useState(null);
-  const [file, setFile] = useState(null);
+  const [scannedTexts, setScannedTexts] = useState([]);
+  const [parsedDatas, setParsedDatas] = useState([]);
+  const [files, setFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedImages, setSelectedImages] = useState([]);
 
   const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
+    setScannedTexts([]);
+    const selectedFiles = Array.from(e.target.files);
+    setFiles(selectedFiles);
+    const selectedImagesArray = [];
+    if (selectedFiles.length > 0) {
+      selectedFiles.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          selectedImagesArray.push(reader.result); // Push each selected image preview to array
+          setSelectedImages([...selectedImagesArray]); // Update selected images state
+        };
+        reader.readAsDataURL(file);
+      });
+    }
   };
 
   const handleScanDocument = async () => {
-    if (file) {
-      setIsLoading(true);
-      try {
-        const result = await Tesseract.recognize(
+    setIsLoading(true);
+    try {
+      const promises = files.map(file =>
+        Tesseract.recognize(
           file,
           'ind',  // Ubah bahasa ke 'ind' jika dokumen dalam bahasa Indonesia
           {
             logger: (m) => console.log(m),
           }
-        );
-        setScannedText(result.data.text);
-        const data = parseOCRText(result.data.text);
-        setParsedData(data);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setIsLoading(false);
-      }
+        ).then(result => result.data.text)
+      );
+      const scannedTextResults = await Promise.all(promises);
+      setScannedTexts(scannedTextResults);
+      const parsedDataResults = scannedTextResults.map(text => parseOCRText(text));
+      setParsedDatas(parsedDataResults);
+    } catch (error) {
+      console.error('Error during OCR:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -118,9 +133,11 @@ export default function Home() {
   };
 
   const extractGolDarah = (lines) => {
-    const line = lines.find(line => line.includes('Gol. Darah'));
+    const line = lines.find(line => {
+      return line.includes('Gol. Darah')
+    })
     if (line) {
-      const match = line.match(/Gol\. Darah\s*:\s*(A|B|AB|O)/i);
+      const match = line.match(/Gol\. Darah\s*:\s*(AB|A|B|O)/i);
       if (match) {
         return match[1].trim();
       }
@@ -140,53 +157,67 @@ export default function Home() {
   };
 
   const handleExportToExcel = () => {
-    if (!parsedData) return;
+    if (!parsedDatas || parsedDatas.length === 0) return;
 
-    const worksheet = XLSX.utils.json_to_sheet([parsedData]);
+    const mergedData = parsedDatas.reduce((acc, data) => {
+      acc.push(data);
+      return acc;
+    }, []);
+
+    const worksheet = XLSX.utils.json_to_sheet(mergedData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Hasil OCR');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Hasil OCR e-KTP');
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    const data = new Blob([excelBuffer], { type: 'application/octet-stream' });
-    saveAs(data, 'hasil_ocr.xlsx');
+    const dataBlob = new Blob([excelBuffer], { type: 'application/octet-stream' });
+    saveAs(dataBlob, 'hasil_ocr_ektp.xlsx');
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col justify-center items-center py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-r from-blue-200 to-purple-200 flex flex-col justify-center items-center py-12 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 p-6 bg-white shadow-md rounded-lg">
         <div>
-          <h2 className="text-center text-3xl font-extrabold text-gray-900">Aplikasi Pemindai Dokumen dengan Tesseract.js</h2>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">e-KTP Scanner App</h2>
         </div>
         <div className="mt-8">
           <div className="flex justify-center">
             <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
-              <span>Pilih Dokumen untuk Dipindai</span>
-              <input id="file-upload" name="file-upload" type="file" accept=".jpg,.jpeg,.png,.bmp" className="sr-only" onChange={handleFileChange} />
+              <span>Select e-KTP to Scan</span>
+              <input id="file-upload" name="file-upload" type="file" accept=".jpg,.jpeg,.png,.bmp" className="sr-only" multiple onChange={handleFileChange} />
             </label>
+          </div>
+          <div className="mt-4 flex flex-wrap justify-center">
+            {selectedImages.map((image, index) => (
+              <div key={index} className="max-w-xs mx-2 my-2 overflow-hidden rounded-lg shadow-md">
+                <img src={image} alt={`Selected e-KTP ${index + 1}`} className="w-full h-auto" />
+              </div>
+            ))}
           </div>
           <div className="mt-6 flex justify-center">
             <button onClick={handleScanDocument} type="button" className="inline-flex items-center px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-              Pindai Dokumen
+              Scan e-KTP
             </button>
           </div>
         </div>
 
         {isLoading && (
           <div className="mt-6 flex justify-center">
-            <p className="text-sm text-gray-500">Memproses...</p>
+            <p className="text-sm text-gray-500">Processing...</p>
           </div>
         )}
 
-        {scannedText && (
-          <div className="mt-8">
+        {scannedTexts.length > 0 && scannedTexts.map((text, index) => (
+          <div key={index} className="mt-8">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900">Hasil OCR:</h3>
+              <h3 className="text-lg font-medium text-gray-900">OCR e-KTP Result {index + 1}:</h3>
             </div>
-            <pre className="mt-2 text-sm text-gray-600 overflow-auto max-h-96 p-2 bg-gray-50 border border-gray-200 rounded-md">{scannedText}</pre>
-            <div className="mt-6 flex justify-center">
-              <button onClick={handleExportToExcel} type="button" className="inline-flex items-center px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                Simpan ke Excel
-              </button>
-            </div>
+            <pre className="mt-2 text-sm text-gray-600 overflow-auto max-h-96 p-2 bg-gray-50 border border-gray-200 rounded-md">{text}</pre>
+          </div>
+        ))}
+        {scannedTexts.length > 0 && (
+          <div className="mt-6 flex justify-center">
+            <button onClick={handleExportToExcel} type="button" className="inline-flex items-center px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              Export OCR e-KTP Results to Excel
+            </button>
           </div>
         )}
       </div>
